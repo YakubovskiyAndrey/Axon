@@ -21,32 +21,68 @@ public class ProcessingRequest {
 
     private final Logger logger;
 
+    private final long timeout;
+
     private final StringBuilder stringBuilder = new StringBuilder();
 
     private final Map<Double, Double> previousAsks = new HashMap<>();
 
     private final Map<Double, Double> previousBids = new HashMap<>();
 
-    public ProcessingRequest(String urlString, String requestMethod, Logger logger) {
+    public ProcessingRequest(String urlString, String requestMethod, Logger logger, long timeout) {
         this.urlString = urlString;
         this.requestMethod = requestMethod;
         this.logger = logger;
+        this.timeout = timeout;
     }
 
     public void start() {
-
         try {
             while (true) {
                 String response = getResponse();
                 getAsks(response);
+                getBids(response);
                 logger.log(Level.INFO, String.valueOf(stringBuilder));
                 stringBuilder.setLength(0);
-                Thread.sleep(3000);
+                Thread.sleep(timeout);
             }
         } catch (InterruptedException | JSONException | IOException e) {
-            logger.log(Level.WARNING, "Interrupted!", e);
+            logger.log(Level.WARNING, String.valueOf(e));
             Thread.currentThread().interrupt();
         }
+    }
+
+    private void getBids(String response) throws JSONException {
+        Map<Double, Double> newPrices = new HashMap<>();
+        JSONObject jsonObject = new JSONObject(response);
+        JSONArray jsonArray = jsonObject.getJSONArray("bids");
+        for(int i = 0; i < jsonArray.length(); i++) {
+            JSONArray orderJson = jsonArray.getJSONArray(i);
+            double price = Double.parseDouble(orderJson.getString(0));
+            double size = Double.parseDouble(orderJson.getString(1));
+
+            if (previousBids.containsKey(price)){
+                if(previousBids.get(price) != size){
+                    stringBuilder.append("update [bid] (").
+                            append(price).append(", ").append(size).append(")").append("\n");
+                }
+            }else {
+                stringBuilder.append("new [bid] (").
+                        append(price).append(", ").append(size).append(")").append("\n");
+            }
+            newPrices.put(price, size);
+        }
+
+        if (!previousBids.isEmpty()){
+            previousBids.entrySet().stream()
+                    .filter(doubleDoubleEntry -> !newPrices.containsKey(doubleDoubleEntry.getKey()))
+                    .forEach(doubleDoubleEntry -> stringBuilder.append("delete [bid] (").
+                            append(doubleDoubleEntry.getKey()).append(", ").
+                            append(doubleDoubleEntry.getValue()).append(")").append("\n"));
+        }
+
+        previousBids.clear();
+        previousBids.putAll(newPrices);
     }
 
     private void getAsks(String response) throws JSONException {
@@ -96,7 +132,7 @@ public class ProcessingRequest {
                     sb.append(line).append("\n");
                 }
             }catch (IOException e){
-                logger.log(Level.WARNING, "Interrupted!", e);
+                logger.log(Level.WARNING, String.valueOf(e));
             }
         }
         return sb.toString();

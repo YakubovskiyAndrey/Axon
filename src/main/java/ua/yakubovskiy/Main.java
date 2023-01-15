@@ -1,7 +1,11 @@
 package ua.yakubovskiy;
 
 import java.io.IOException;
-import java.util.logging.*;
+import java.util.logging.Logger;
+import java.util.logging.Handler;
+import java.util.logging.FileHandler;
+import java.util.logging.Formatter;
+import java.util.logging.LogRecord;
 
 public class Main {
 
@@ -14,7 +18,7 @@ public class Main {
         LOGGER.addHandler(fileHandler);
         ProcessingRequest processingRequest =
                 new ProcessingRequest("https://api.binance.com/api/v3/depth?limit=5000&symbol=LINKUSDT",
-                        "GET", LOGGER);
+                        "GET", LOGGER, 10000);
         processingRequest.start();
     }
 
