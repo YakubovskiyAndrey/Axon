@@ -1,8 +1,6 @@
 package ua.yakubovskiy;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import ua.yakubovskiy.parser.JsonParser;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.BufferedReader;
@@ -10,7 +8,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.logging.Level;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 public class ProcessingRequest {
@@ -21,15 +21,17 @@ public class ProcessingRequest {
 
     private final Logger logger;
 
-    private final long timeout;
+    private final int timeout;
 
-    private final StringBuilder stringBuilder = new StringBuilder();
+    private final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
+
+    private final JsonParser jsonParser = new JsonParser();
 
     private final Map<Double, Double> previousAsks = new HashMap<>();
 
     private final Map<Double, Double> previousBids = new HashMap<>();
 
-    public ProcessingRequest(String urlString, String requestMethod, Logger logger, long timeout) {
+    public ProcessingRequest(String urlString, String requestMethod, Logger logger, int timeout) {
         this.urlString = urlString;
         this.requestMethod = requestMethod;
         this.logger = logger;
@@ -37,104 +39,123 @@ public class ProcessingRequest {
     }
 
     public void start() {
+        executorService.scheduleAtFixedRate(() -> {
+            String response = getResponse();
+            getAsks(response);
+            getBids(response);
+        }, 0, timeout, TimeUnit.SECONDS);
+    }
+
+    private HttpURLConnection getConnection(){
+        HttpURLConnection connection = null;
         try {
-            while (true) {
-                String response = getResponse();
-                getAsks(response);
-                getBids(response);
-                logger.log(Level.INFO, String.valueOf(stringBuilder));
-                stringBuilder.setLength(0);
-                Thread.sleep(timeout);
-            }
-        } catch (InterruptedException | JSONException | IOException e) {
-            logger.log(Level.WARNING, String.valueOf(e));
-            Thread.currentThread().interrupt();
+            URL url = new URL(urlString);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod(requestMethod);
+            connection.connect();
+        } catch (Exception e) {
+            logger.warning(String.valueOf(e));
+            executorService.shutdown();
         }
+        return connection;
     }
 
-    private void getBids(String response) throws JSONException {
-        Map<Double, Double> newPrices = new HashMap<>();
-        JSONObject jsonObject = new JSONObject(response);
-        JSONArray jsonArray = jsonObject.getJSONArray("bids");
-        for(int i = 0; i < jsonArray.length(); i++) {
-            JSONArray orderJson = jsonArray.getJSONArray(i);
-            double price = Double.parseDouble(orderJson.getString(0));
-            double size = Double.parseDouble(orderJson.getString(1));
-
-            if (previousBids.containsKey(price)){
-                if(previousBids.get(price) != size){
-                    stringBuilder.append("update [bid] (").
-                            append(price).append(", ").append(size).append(")").append("\n");
-                }
-            }else {
-                stringBuilder.append("new [bid] (").
-                        append(price).append(", ").append(size).append(")").append("\n");
-            }
-            newPrices.put(price, size);
-        }
-
-        if (!previousBids.isEmpty()){
-            previousBids.entrySet().stream()
-                    .filter(doubleDoubleEntry -> !newPrices.containsKey(doubleDoubleEntry.getKey()))
-                    .forEach(doubleDoubleEntry -> stringBuilder.append("delete [bid] (").
-                            append(doubleDoubleEntry.getKey()).append(", ").
-                            append(doubleDoubleEntry.getValue()).append(")").append("\n"));
-        }
-
-        previousBids.clear();
-        previousBids.putAll(newPrices);
-    }
-
-    private void getAsks(String response) throws JSONException {
-        Map<Double, Double> newPrices = new HashMap<>();
-        JSONObject jsonObject = new JSONObject(response);
-        JSONArray jsonArray = jsonObject.getJSONArray("asks");
-        for(int i = 0; i < jsonArray.length(); i++) {
-            JSONArray orderJson = jsonArray.getJSONArray(i);
-            double price = Double.parseDouble(orderJson.getString(0));
-            double size = Double.parseDouble(orderJson.getString(1));
-
-            if (previousAsks.containsKey(price)){
-                if(previousAsks.get(price) != size){
-                    stringBuilder.append("update [ask] (").
-                            append(price).append(", ").append(size).append(")").append("\n");
-                }
-            }else {
-                stringBuilder.append("new [ask] (").
-                        append(price).append(", ").append(size).append(")").append("\n");
-            }
-            newPrices.put(price, size);
-        }
-
-        if (!previousAsks.isEmpty()){
-            previousAsks.entrySet().stream()
-                    .filter(doubleDoubleEntry -> !newPrices.containsKey(doubleDoubleEntry.getKey()))
-                    .forEach(doubleDoubleEntry -> stringBuilder.append("delete [ask] (").
-                            append(doubleDoubleEntry.getKey()).append(", ").
-                            append(doubleDoubleEntry.getValue()).append(")").append("\n"));
-        }
-
-        previousAsks.clear();
-        previousAsks.putAll(newPrices);
-    }
-
-    private String getResponse() throws IOException {
-        URL url = new URL(urlString);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod(requestMethod);
-        connection.connect();
+    private String getResponse() {
+        HttpURLConnection connection = getConnection();
         StringBuilder sb = new StringBuilder();
 
-        if(connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+        if(connection != null) {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     sb.append(line).append("\n");
                 }
-            }catch (IOException e){
-                logger.log(Level.WARNING, String.valueOf(e));
+            } catch (IOException e) {
+                logger.warning(String.valueOf(e));
+                executorService.shutdown();
             }
+            connection.disconnect();
         }
         return sb.toString();
+    }
+
+    private void getBids(String response) {
+        String orderType = "bids";
+        Map<Double, Double> newOrders = jsonParser.getOrders(response, orderType);
+
+        double totalPreviousSize = previousBids.values().stream()
+                .mapToDouble(v -> v).sum();
+        double totalNewOrderSize = newOrders.values().stream()
+                .mapToDouble(v -> v).sum();
+
+        checkOrdersResizing(totalPreviousSize, totalNewOrderSize, orderType);
+
+        newOrders.forEach((key, value) -> {
+            double price = key;
+            double size = value;
+            if (previousBids.containsKey(price)) {
+                if (previousBids.get(price) != size) {
+                    logger.info("update [bid] (%f, %f)%n".formatted(price, size));
+                }
+            } else {
+                logger.info("new [bid] (%f, %f)%n".formatted(price, size));
+            }
+        });
+
+        if(!previousBids.isEmpty()) {
+            previousBids.entrySet().stream()
+                    .filter(doubleDoubleEntry -> !newOrders.containsKey(doubleDoubleEntry.getKey()))
+                    .forEach(doubleDoubleEntry ->
+                            logger.info("delete [bid] (%f, %f)%n".
+                                    formatted(doubleDoubleEntry.getKey(), doubleDoubleEntry.getValue())));
+
+            previousBids.clear();
+        }
+        previousBids.putAll(newOrders);
+    }
+
+    private void getAsks(String response) {
+        String orderType = "asks";
+        Map<Double, Double> newOrders = jsonParser.getOrders(response, orderType);
+
+        double totalPreviousSize = previousAsks.values().stream()
+                .mapToDouble(v -> v).sum();
+        double totalNewOrderSize = newOrders.values().stream()
+                .mapToDouble(v -> v).sum();
+
+        checkOrdersResizing(totalPreviousSize, totalNewOrderSize, orderType);
+
+        newOrders.forEach((key, value) -> {
+            double price = key;
+            double size = value;
+            if (previousAsks.containsKey(price)) {
+                if (previousAsks.get(price) != size) {
+                    logger.info("update [ask] (%f, %f)%n".formatted(price, size));
+                }
+            } else {
+                logger.info("new [ask] (%f, %f)%n".formatted(price, size));
+            }
+        });
+
+        if(!previousAsks.isEmpty()) {
+            previousAsks.entrySet().stream()
+                    .filter(doubleDoubleEntry -> !newOrders.containsKey(doubleDoubleEntry.getKey()))
+                    .forEach(doubleDoubleEntry ->
+                            logger.info("delete [ask] (%f, %f)%n".
+                                    formatted(doubleDoubleEntry.getKey(), doubleDoubleEntry.getValue())));
+
+            previousAsks.clear();
+        }
+        previousAsks.putAll(newOrders);
+    }
+
+    private void checkOrdersResizing(double totalPreviousSize, double totalNewOrderSize, String orderType){
+        if(totalPreviousSize > totalNewOrderSize){
+            logger.info("%s decreased by %f%n".formatted(orderType, totalPreviousSize - totalNewOrderSize));
+        } else if (totalPreviousSize < totalNewOrderSize) {
+            logger.info("%s increased by %f%n".formatted(orderType, totalNewOrderSize - totalPreviousSize));
+        }else {
+            logger.info("%s have not changed".formatted(orderType));
+        }
     }
 }

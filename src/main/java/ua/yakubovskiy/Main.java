@@ -16,9 +16,10 @@ public class Main {
         fileHandler.setFormatter(new HandlerFormatter());
         LOGGER.setUseParentHandlers(false);
         LOGGER.addHandler(fileHandler);
+
         ProcessingRequest processingRequest =
                 new ProcessingRequest("https://api.binance.com/api/v3/depth?limit=5000&symbol=LINKUSDT",
-                        "GET", LOGGER, 10000);
+                        "GET", LOGGER, 10);
         processingRequest.start();
     }
 
