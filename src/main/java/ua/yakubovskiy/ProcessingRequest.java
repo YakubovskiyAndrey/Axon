@@ -4,7 +4,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.BufferedReader;
 import java.net.HttpURLConnection;
@@ -20,7 +19,7 @@ public class ProcessingRequest {
 
     private final String requestMethod;
 
-    private static final Logger LOGGER = Logger.getLogger(ProcessingRequest.class.getName());
+    private final Logger logger;
 
     private final StringBuilder stringBuilder = new StringBuilder();
 
@@ -28,9 +27,10 @@ public class ProcessingRequest {
 
     private final Map<Double, Double> previousBids = new HashMap<>();
 
-    public ProcessingRequest(String urlString, String requestMethod) {
+    public ProcessingRequest(String urlString, String requestMethod, Logger logger) {
         this.urlString = urlString;
         this.requestMethod = requestMethod;
+        this.logger = logger;
     }
 
     public void start() {
@@ -39,12 +39,13 @@ public class ProcessingRequest {
             while (true) {
                 String response = getResponse();
                 getAsks(response);
-                System.out.println(stringBuilder);
+                logger.log(Level.INFO, String.valueOf(stringBuilder));
                 stringBuilder.setLength(0);
                 Thread.sleep(3000);
             }
         } catch (InterruptedException | JSONException | IOException e) {
-            LOGGER.log(Level.WARNING, "Interrupted!", e);
+            logger.log(Level.WARNING, "Interrupted!", e);
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -86,19 +87,17 @@ public class ProcessingRequest {
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod(requestMethod);
         connection.connect();
-
-        int status = connection.getResponseCode();
-
         StringBuilder sb = new StringBuilder();
-        try (InputStream in = (status == HttpURLConnection.HTTP_OK)
-                ? connection.getInputStream() : connection.getErrorStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(in))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n");
+
+        if(connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+            }catch (IOException e){
+                logger.log(Level.WARNING, "Interrupted!", e);
             }
-        } catch (IOException e) {
-            e.printStackTrace();
         }
         return sb.toString();
     }
