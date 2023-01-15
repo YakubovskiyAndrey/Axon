@@ -9,9 +9,8 @@ import java.io.InputStreamReader;
 import java.io.BufferedReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 
 public class ProcessingRequest {
 
@@ -34,13 +33,15 @@ public class ProcessingRequest {
         try {
             String response = getResponse();
             getAsks(response);
+            System.out.println(stringBuilder);
+            stringBuilder.setLength(0);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
     private void getAsks(String response) throws JSONException {
-        Map<Double, Double> resultAsks = new HashMap<>();
+        Map<Double, Double> newPrices = new HashMap<>();
         JSONObject jsonObject = new JSONObject(response);
         JSONArray jsonArray = jsonObject.getJSONArray("asks");
         for(int i = 0; i < jsonArray.length(); i++) {
@@ -48,15 +49,28 @@ public class ProcessingRequest {
             double price = Double.parseDouble(orderJson.getString(0));
             double size = Double.parseDouble(orderJson.getString(1));
 
-            resultAsks.put(price, size);
             if (previousAsks.containsKey(price)){
                 if(previousAsks.get(price) != size){
-
+                    stringBuilder.append("update [ask] (").
+                            append(price).append(", ").append(size).append(")").append("\n");
                 }
+            }else {
+                stringBuilder.append("new [ask] (").
+                        append(price).append(", ").append(size).append(")").append("\n");
             }
-
+            newPrices.put(price, size);
         }
-       
+
+        if (!previousAsks.isEmpty()){
+            previousAsks.entrySet().stream()
+                    .filter(doubleDoubleEntry -> !newPrices.containsKey(doubleDoubleEntry.getKey()))
+                    .forEach(doubleDoubleEntry -> stringBuilder.append("delete [ask] (").
+                            append(doubleDoubleEntry.getKey()).append(", ").
+                            append(doubleDoubleEntry.getValue()).append(")").append("\n"));
+        }
+
+        previousAsks.clear();
+        previousAsks.putAll(newPrices);
     }
 
     private String getResponse() throws IOException {
