@@ -5,14 +5,6 @@ public class Main {
         ProcessingRequest processingRequest =
                 new ProcessingRequest("https://api.binance.com/api/v3/depth?limit=5000&symbol=LINKUSDT",
                         "GET");
-
-        while (true) {
-            processingRequest.start();
-            try {
-                Thread.sleep(3000);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        }
+        processingRequest.start();
     }
 }

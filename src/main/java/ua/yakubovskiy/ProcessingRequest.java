@@ -11,12 +11,16 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class ProcessingRequest {
 
     private final String urlString;
 
     private final String requestMethod;
+
+    private static final Logger LOGGER = Logger.getLogger(ProcessingRequest.class.getName());
 
     private final StringBuilder stringBuilder = new StringBuilder();
 
@@ -30,13 +34,17 @@ public class ProcessingRequest {
     }
 
     public void start() {
+
         try {
-            String response = getResponse();
-            getAsks(response);
-            System.out.println(stringBuilder);
-            stringBuilder.setLength(0);
-        } catch (Exception e) {
-            e.printStackTrace();
+            while (true) {
+                String response = getResponse();
+                getAsks(response);
+                System.out.println(stringBuilder);
+                stringBuilder.setLength(0);
+                Thread.sleep(3000);
+            }
+        } catch (InterruptedException | JSONException | IOException e) {
+            LOGGER.log(Level.WARNING, "Interrupted!", e);
         }
     }
 
